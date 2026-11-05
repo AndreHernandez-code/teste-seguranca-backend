@@ -7,19 +7,36 @@
 
 /* ---------- Configuracao ---------- */
 
-// Se o frontend for servido pelo proprio Spring Boot (http://localhost:8080),
-// API_BASE fica vazio e as chamadas vao para a mesma origem.
-// Se estiver no Live Server (porta 5500), aponta para o backend.
-const API_BASE = (location.port === '8080' || location.protocol === 'file:')
-  ? ''
-  : 'http://localhost:8080';
+// O front e servido pelo PROPRIO Spring Boot, entao as chamadas vao sempre para
+// a mesma origem. Nao ha URL de backend no codigo: isso evita ter endereco
+// interno escrito no JS, e o navegador cuida do cookie de sessao sozinho.
+// Para apontar para outro lugar, defina window.API_BASE antes de carregar app.js.
+const API_BASE = window.API_BASE ?? '';
 
 const ENDPOINTS = {
   agendamentos: '/api/agendamentos',
   clientes:     '/api/clientes',
   veiculos:     '/api/veiculos',
   servicos:     '/api/servicos',
+  // Fora de CRUD_GENERICO: so ADMIN acessa, usa POST/PUT/DELETE proprios e a
+  // exclusao aqui e DESATIVACAO (preserva historico), nao remocao.
+  funcionarios: '/api/usuarios',
 };
+
+const AUTH = {
+  login:  '/api/auth/login',
+  logout: '/api/auth/logout',
+  me:     '/api/auth/me',
+};
+
+/** Nome do cookie de sessao. Usado so para saber se ha sessao, nunca lido. */
+const COOKIE_SESSAO = 'LAVAJATO_SESSION';
+const COOKIE_CSRF = 'XSRF-TOKEN';
+
+/** Inatividade tolerada antes de derrubar a sessao no cliente (30 min).
+ *  O servidor expira em 2h; isto e uma rede de seguranca para estacao
+ *  deixada aberta, nao a fonte da verdade. */
+const LIMITE_INATIVIDADE_MS = 30 * 60 * 1000;
 
 const STATUS_LABEL = {
   AGUARDANDO:   'Aguardando',
@@ -28,6 +45,16 @@ const STATUS_LABEL = {
   CANCELADO:    'Cancelado',
 };
 
+const PERFIL_LABEL = {
+  ADMIN:     'Administrador',
+  ATENDENTE: 'Atendente',
+};
+
+/** Recursos que seguem o CRUD generico (carregar, editar e excluir iguais).
+ *  `funcionarios` fica de fora: exige ser ADMIN e a exclusao la e desativacao,
+ *  com confirmacao e mensagens proprias. */
+const CRUD_GENERICO = ['agendamentos', 'clientes', 'veiculos', 'servicos'];
+
 /* ---------- Estado ---------- */
 
 const state = {
@@ -35,7 +62,10 @@ const state = {
   clientes:     [],
   veiculos:     [],
   servicos:     [],
+  funcionarios: [],
   filtroStatus: '',
+  filtroPeriodo: '',
+  usuario:      null,   // { login, perfis: ['ADMIN'|'ATENDENTE'] }
 };
 
 /* ---------- Helpers ---------- */
@@ -70,33 +100,131 @@ function parseDataHora(valor) {
   };
 }
 
+/* ---------- Autenticacao e CSRF ---------- */
+
+/** Le um cookie pelo nome. Usado para o token CSRF e para saber se ha sessao.
+ *  Devolve null se o cookie nao existir. */
+function lerCookie(nome) {
+  for (const parte of document.cookie.split('; ')) {
+    const i = parte.indexOf('=');
+    if (i > 0 && parte.slice(0, i) === nome) {
+      return decodeURIComponent(parte.slice(i + 1));
+    }
+  }
+  return null;
+}
+
+/** Ha sessao? Olhamos o cookie, que e HttpOnly, para NAO confiar apenas em estado
+ *  do JS. Nao conseguimos ler o valor (e HttpOnly mesmo), so saber se existe. */
+function temSessao() {
+  return document.cookie.split('; ').some((p) => p.startsWith(COOKIE_SESSAO + '='));
+}
+
+/** Pede ao servidor para emitir o cookie XSRF-TOKEN, se ainda nao existir. */
+async function garantirTokenCsrf() {
+  if (lerCookie(COOKIE_CSRF)) return;
+  try {
+    await fetch(API_BASE + '/api/auth/csrf', { credentials: 'same-origin' });
+  } catch {
+    // Sem rede o login vai falhar adiante com mensagem melhor.
+  }
+}
+
+/* ---------- Sessao: expiracao ---------- */
+
+let temporizadorInatividade = null;
+
+/** Encerra a sessao do lado do cliente e volta para a tela de login.
+ *  `motivo` vira a mensagem mostrada ao usuario. */
+function encerrarSessao(motivo) {
+  state.usuario = null;
+  limparEstado();
+  clearTimeout(temporizadorInatividade);
+  mostrarTelaLogin(motivo);
+}
+
+/** Zera os dados em memoria para nao vazar registro de um usuario para a tela
+ *  do proximo que logar na mesma maquina. */
+function limparEstado() {
+  for (const chave of Object.keys(ENDPOINTS)) state[chave] = [];
+}
+
+/** Quais listas este usuario pode carregar. /api/usuarios exige ADMIN: busca-lo
+ *  como ATENDENTE daria 403 e pintaria a barra de status de vermelho a toa. */
+function chavesCarregaveis() {
+  return ehAdmin() ? Object.keys(ENDPOINTS) : CRUD_GENERICO;
+}
+
+/** Reinicia a contagem de inatividade. Chamada a cada interacao do usuario. */
+function renovarInatividade() {
+  clearTimeout(temporizadorInatividade);
+  if (!state.usuario) return;
+  temporizadorInatividade = setTimeout(() => {
+    // Nao ha "logout local": encerramos no servidor tambem, senao o cookie
+    // de sessao continuaria valido e um F5 voltaria logado.
+    sair('Sessão encerrada por inatividade.');
+  }, LIMITE_INATIVIDADE_MS);
+}
+
 /* ---------- Camada HTTP ---------- */
 
 async function api(path, options = {}) {
   const { method = 'GET', body } = options;
 
+  // O token vai em TODA chamada que muda estado. GET/HEAD nao precisam: o
+  // SecurityConfig isenta os metodos seguros do CSRF.
+  const cabecalhos = {};
+  if (body) cabecalhos['Content-Type'] = 'application/json';
+
+  const token = lerCookie(COOKIE_CSRF);
+  if (token && method !== 'GET' && method !== 'HEAD') {
+    cabecalhos['X-XSRF-TOKEN'] = token;
+  }
+
   let res;
   try {
     res = await fetch(API_BASE + path, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: cabecalhos,
       body: body ? JSON.stringify(body) : undefined,
+      // Sem isto o navegador nao envia o cookie de sessao e todo request vira anonimo.
+      credentials: 'same-origin',
     });
-  } catch (err) {
+  } catch {
     // fetch so rejeita por falha de rede - o backend provavelmente esta parado.
-    throw new Error(
-      `Não foi possível falar com o servidor (${API_BASE || location.origin}). ` +
-      'Verifique se o backend está rodando.'
-    );
+    // Nao revelamos a URL do backend: o usuario nao precisa dela para agir.
+    throw new Error('Não foi possível falar com o servidor. Verifique sua conexão.');
   }
 
   if (!res.ok) {
-    const detalhe = await res.text().catch(() => '');
-    throw new Error(`Erro ${res.status} em ${method} ${path}${detalhe ? ` — ${detalhe.slice(0, 200)}` : ''}`);
+    const corpo = await res.json().catch(() => null);
+    const campos = corpo?.campos ? ' ' + Object.values(corpo.campos).join(' ') : '';
+    const erro = new Error((corpo?.mensagem ?? mensagemPadrao(res.status)) + campos);
+    erro.status = res.status;
+
+    // 401 = sessao caiu ou expirou. Volta para o login, mas SEM tentar de novo:
+    // a chamada original falhou e insistir so geraria loop.
+    if (res.status === 401 && state.usuario) {
+      encerrarSessao('Sua sessão expirou. Entre novamente.');
+    }
+
+    throw erro;
   }
 
   if (res.status === 204) return null;
   return res.json();
+}
+
+/** Mensagem generica por codigo, usada quando o corpo nao traz "mensagem".
+ *  Sem detalhe tecnico: o usuario ve o que aconteceu, nao como o servidor falhou. */
+function mensagemPadrao(status) {
+  if (status === 400) return 'Dados inválidos. Confira os campos.';
+  if (status === 401) return 'Sessão expirada. Entre novamente.';
+  if (status === 403) return 'Você não tem permissão para esta ação.';
+  if (status === 404) return 'Registro não encontrado.';
+  if (status === 409) return 'Não é possível concluir: há registros ligados a este.';
+  if (status >= 500) return 'O servidor teve um problema. Tente novamente.';
+  return 'Não foi possível concluir a operação.';
 }
 
 /* ---------- Status da conexao ---------- */
@@ -172,7 +300,7 @@ async function withLoading(button, fn) {
 async function carregarTudo() {
   setStatus('loading', 'Carregando…');
 
-  const nomes = Object.keys(ENDPOINTS);
+  const nomes = chavesCarregaveis();
   const resultados = await Promise.allSettled(
     nomes.map((nome) => api(ENDPOINTS[nome]))
   );
@@ -185,9 +313,14 @@ async function carregarTudo() {
       state[nome] = Array.isArray(resultado.value) ? resultado.value : [];
     } else {
       state[nome] = [];
-      falhas.push(`${nome}: ${resultado.reason.message}`);
+      falhas.push(resultado.reason);
     }
   });
+
+  // Sessao expirada nao e "sem conexao": o api() ja mandou o usuario para o
+  // login. Reportar falha de carregamento aqui seria mentira e ainda por cima
+  // escreveria status na barra do topo depois dela ter sido trocada.
+  if (falhas.some((f) => f.status === 401)) return;
 
   renderTudo();
 
@@ -195,11 +328,10 @@ async function carregarTudo() {
     setStatus('ok', 'Conectado');
   } else if (falhas.length === nomes.length) {
     setStatus('error', 'Sem conexão');
-    toast('Não foi possível carregar os dados. O backend está rodando em ' +
-          `${API_BASE || location.origin}?`, 'error', 9000);
+    toast('Não foi possível carregar os dados. Verifique sua conexão.', 'error', 9000);
   } else {
     setStatus('error', 'Carga parcial');
-    toast(`Alguns dados não carregaram — ${falhas.join('; ')}`, 'error', 9000);
+    toast(`Alguns dados não carregaram. ${falhas[0].message}`, 'error', 9000);
   }
 }
 
@@ -257,7 +389,7 @@ function emptyRow(colspan, message) {
  * @param {object} item     registro da linha
  * @param {string} descricao como o registro aparece na confirmacao
  */
-function acoesCell(recurso, item, descricao) {
+function acoesCell(recurso, item, descricao, extra) {
   const td = el('td', 'acoes');
 
   const editar = el('button', 'icon-btn', 'Editar');
@@ -265,13 +397,63 @@ function acoesCell(recurso, item, descricao) {
   editar.setAttribute('aria-label', `Editar ${descricao}`);
   editar.addEventListener('click', () => abrirEdicao(recurso, item));
 
-  const excluir = el('button', 'icon-btn icon-btn--danger', 'Excluir');
-  excluir.type = 'button';
-  excluir.setAttribute('aria-label', `Excluir ${descricao}`);
-  excluir.addEventListener('click', () => abrirExclusao(recurso, item, descricao));
+  if (extra) td.append(extra);
+  td.append(editar);
 
-  td.append(editar, excluir);
+  // Esconder "Excluir" de quem nao e ADMIN e so estetica: a regra de verdade
+  // esta no SecurityConfig (DELETE /api/** exige ROLE_ADMIN) e o servidor
+  // responde 403 se alguem chamar a API na mao.
+  if (ehAdmin()) {
+    const excluir = el('button', 'icon-btn icon-btn--danger', 'Excluir');
+    excluir.type = 'button';
+    excluir.setAttribute('aria-label', `Excluir ${descricao}`);
+    excluir.addEventListener('click', () => abrirExclusao(recurso, item, descricao));
+    td.append(excluir);
+  }
+
   return td;
+}
+
+const PROXIMO = {
+  AGUARDANDO:   ['EM_ANDAMENTO', 'Iniciar'],
+  EM_ANDAMENTO: ['CONCLUIDO', 'Concluir'],
+};
+
+/** Botão "Iniciar" / "Concluir": avança o status sem abrir o diálogo de edição. */
+function botaoAvancar(ag) {
+  const prox = PROXIMO[ag.status || 'AGUARDANDO'];
+  if (!prox) return null;
+
+  const btn = el('button', 'icon-btn icon-btn--ok', prox[1]);
+  btn.type = 'button';
+  btn.addEventListener('click', async () => {
+    try {
+      await withLoading(btn, () => api(`${ENDPOINTS.agendamentos}/${ag.id}`, {
+        method: 'PUT',
+        body: {
+          dataHora: ag.dataHora,
+          status: prox[0],
+          // So os ids: o backend resolve a entidade. Mandar o objeto inteiro
+          // arriscava sobrescrever campos que nao sao desta tela.
+          veiculo: { id: ag.veiculo?.id },
+          servico: { id: ag.servico?.id },
+        },
+      }));
+      toast(`Agendamento: ${STATUS_LABEL[prox[0]]}.`, 'ok');
+      await carregarTudo();
+    } catch (err) {
+      toast(err.message, 'error', 8000);
+    }
+  });
+  return btn;
+}
+
+function dentroDoPeriodo(a) {
+  const t = parseDataHora(a.dataHora).ordenacao;
+  const ini = new Date();
+  ini.setHours(0, 0, 0, 0);
+  const dias = state.filtroPeriodo === 'hoje' ? 1 : 7;
+  return t >= ini.getTime() && t < ini.getTime() + dias * 86400000;
 }
 
 function renderAgendamentos() {
@@ -286,13 +468,16 @@ function renderAgendamentos() {
   if (state.filtroStatus) {
     lista = lista.filter((a) => a.status === state.filtroStatus);
   }
+  if (state.filtroPeriodo) {
+    lista = lista.filter(dentroDoPeriodo);
+  }
 
   if (lista.length === 0) {
     tbody.append(emptyRow(
       7,
       state.agendamentos.length === 0
         ? 'Nenhum agendamento cadastrado ainda.'
-        : 'Nenhum agendamento com esse status.'
+        : 'Nenhum agendamento com esse filtro.'
     ));
     return;
   }
@@ -325,7 +510,7 @@ function renderAgendamentos() {
       el('span', 'cell-sub', ag.servico?.tempoEstimado ? `${ag.servico.tempoEstimado} min` : '')
     );
 
-    const tdValor = el('td', 'num', money.format(ag.servico?.preco ?? 0));
+    const tdValor = el('td', 'num', money.format(ag.precoCobrado ?? ag.servico?.preco ?? 0));
 
     const tdStatus = el('td');
     tdStatus.append(el(
@@ -337,7 +522,7 @@ function renderAgendamentos() {
     const descricaoAg = `${data} ${hora} — ${ag.servico?.nome ?? 'serviço'}`;
     tr.append(
       tdData, tdCliente, tdVeiculo, tdServico, tdValor, tdStatus,
-      acoesCell('agendamentos', ag, descricaoAg)
+      acoesCell('agendamentos', ag, descricaoAg, botaoAvancar(ag))
     );
     frag.append(tr);
   }
@@ -425,6 +610,97 @@ function renderServicos() {
   tbody.append(frag);
 }
 
+/** Acoes da linha de funcionario.
+ *
+ *  Nao usa acoesCell(): la o "Excluir" e uma remocao definitiva, e aqui a acao
+ *  e DESATIVAR (o backend preserva o registro). Rotulo diferente para o usuario
+ *  nao achar que vai apagar o historico de quem operou.
+ *
+ *  Editar fica disponivel mesmo para quem esta inativo - e assim que se
+ *  reativa alguem; sem isso, um funcionario desativado por engano ficaria preso
+ *  fora do sistema, sem tela para voltar. */
+function acoesFuncionario(u) {
+  const td = el('td', 'acoes');
+
+  const editar = el('button', 'icon-btn', 'Editar');
+  editar.type = 'button';
+  editar.setAttribute('aria-label', `Editar ${u.nome ?? u.login}`);
+  editar.addEventListener('click', () => abrirEdicao('funcionarios', u));
+  td.append(editar);
+
+  // Nao oferece desativar a propria conta: o backend recusa (ultimo admin) ou
+  // deixaria o usuario se expulsando no meio do expediente sem perceber por que.
+  const ehPropria = u.login === state.usuario?.login;
+
+  if (u.ativo && !ehPropria && !ehUltimoAdmin(u)) {
+    const desativar = el('button', 'icon-btn icon-btn--danger', 'Desativar');
+    desativar.type = 'button';
+    desativar.setAttribute('aria-label', `Desativar ${u.nome ?? u.login}`);
+    desativar.addEventListener('click', () => abrirDesativacao(u));
+    td.append(desativar);
+  }
+
+  return td;
+}
+
+/** Este e o unico ADMIN ativo? Espelha a regra do backend (protegerUltimoAdmin)
+ *  para nao oferecer um botao que so pode terminar em 422. */
+function ehUltimoAdmin(u) {
+  if (u.perfil !== 'ADMIN' || !u.ativo) return false;
+  return state.funcionarios.filter((f) => f.perfil === 'ADMIN' && f.ativo).length <= 1;
+}
+
+function renderFuncionarios() {
+  const tbody = $('#tbody-funcionarios');
+  tbody.replaceChildren();
+
+  if (state.funcionarios.length === 0) {
+    tbody.append(emptyRow(6, 'Nenhum funcionário cadastrado ainda.'));
+    return;
+  }
+
+  // Ativos primeiro, depois por nome: quem esta trabalhando hoje interessa mais.
+  const lista = state.funcionarios.slice().sort((a, b) => {
+    if (a.ativo !== b.ativo) return a.ativo ? -1 : 1;
+    return String(a.nome ?? '').localeCompare(String(b.nome ?? ''), 'pt-BR');
+  });
+
+  const frag = document.createDocumentFragment();
+
+  for (const u of lista) {
+    const ehPropria = u.login === state.usuario?.login;
+
+    const tdNome = el('td');
+    tdNome.append(el('span', 'cell-strong', u.nome ?? '—'));
+    if (ehPropria) tdNome.append(el('span', 'cell-sub', 'você'));
+
+    const tdPerfil = el('td');
+    tdPerfil.append(el('span', 'badge', PERFIL_LABEL[u.perfil] ?? u.perfil ?? '—'));
+
+    const tdSituacao = el('td');
+    tdSituacao.append(el(
+      'span',
+      u.ativo ? 'badge badge--ativo' : 'badge badge--inativo',
+      u.ativo ? 'Ativo' : 'Desativado'
+    ));
+
+    const tr = el('tr');
+    if (!u.ativo) tr.className = 'row--inativo';
+
+    tr.append(
+      el('td', 'muted', String(u.id ?? '—')),
+      tdNome,
+      el('td', 'mono', u.login ?? '—'),
+      tdPerfil,
+      tdSituacao,
+      acoesFuncionario(u)
+    );
+    frag.append(tr);
+  }
+
+  tbody.append(frag);
+}
+
 function renderStats() {
   const ativos = state.agendamentos.filter((a) => a.status !== 'CANCELADO');
 
@@ -432,7 +708,7 @@ function renderStats() {
   $('#stat-agendamentos-aguardando').textContent =
     String(state.agendamentos.filter((a) => (a.status || 'AGUARDANDO') === 'AGUARDANDO').length);
 
-  const faturamento = ativos.reduce((soma, a) => soma + Number(a.servico?.preco ?? 0), 0);
+  const faturamento = ativos.reduce((soma, a) => soma + Number(a.precoCobrado ?? a.servico?.preco ?? 0), 0);
   $('#stat-agendamentos-faturamento').textContent = money.format(faturamento);
 }
 
@@ -443,6 +719,7 @@ function renderTudo() {
   renderClientes();
   renderVeiculos();
   renderServicos();
+  renderFuncionarios();
 }
 
 /* ---------- Editar / Excluir ---------- */
@@ -509,13 +786,13 @@ const EDICAO = {
       };
     },
     montar(item, dados) {
-      const cliente = state.clientes.find((c) => String(c.id) === String(dados.cliente));
-      if (!cliente) throw new Error('Selecione um cliente válido.');
+      const clienteOk = state.clientes.some((c) => String(c.id) === String(dados.cliente));
+      if (!clienteOk) throw new Error('Selecione um cliente válido.');
       return {
         id: item.id,
-        placa: dados.placa.trim().toUpperCase(),
+        placa: dados.placa.toUpperCase().replace(/[^A-Z0-9]/g, ''),
         modelo: dados.modelo.trim(),
-        cliente,
+        cliente: { id: Number(dados.cliente) },
       };
     },
   },
@@ -549,17 +826,63 @@ const EDICAO = {
       };
     },
     montar(item, dados) {
-      const veiculo = state.veiculos.find((v) => String(v.id) === String(dados.veiculo));
-      const servico = state.servicos.find((s) => String(s.id) === String(dados.servico));
-      if (!veiculo) throw new Error('Selecione um veículo válido.');
-      if (!servico) throw new Error('Selecione um serviço válido.');
+      const veiculoOk = state.veiculos.some((v) => String(v.id) === String(dados.veiculo));
+      const servicoOk = state.servicos.some((s) => String(s.id) === String(dados.servico));
+      if (!veiculoOk) throw new Error('Selecione um veículo válido.');
+      if (!servicoOk) throw new Error('Selecione um serviço válido.');
 
       return {
         id: item.id,
         dataHora: `${dados.data}T${dados.hora}:00`,
         status: dados.status,
-        veiculo,
-        servico,
+        // So os ids, como nos demais formularios.
+        veiculo: { id: Number(dados.veiculo) },
+        servico: { id: Number(dados.servico) },
+      };
+    },
+  },
+
+  funcionarios: {
+    titulo: 'Editar funcionário',
+    campos: [
+      { id: 'ed-fu-nome',   campo: 'nome',   label: 'Nome',   tipo: 'text', required: true },
+      { id: 'ed-fu-login',  campo: 'login',  label: 'Login',  tipo: 'text', required: true, lower: true },
+      // Vazio = manter a senha atual. Por isso NAO e required: e o que permite
+      // corrigir um nome sem trocar a senha de ninguem.
+      { id: 'ed-fu-senha',  campo: 'senha',  label: 'Nova senha', tipo: 'password' },
+      { id: 'ed-fu-perfil', campo: 'perfil', label: 'Perfil', tipo: 'select-perfis', required: true },
+      { id: 'ed-fu-ativo',  campo: 'ativo',  label: 'Situação', tipo: 'select-ativo', required: true },
+    ],
+    corpo(item) {
+      return {
+        nome: item.nome ?? '',
+        login: item.login ?? '',
+        senha: '',                                  // nunca preenchemos senha existente
+        perfil: item.perfil ?? 'ATENDENTE',
+        ativo: item.ativo === false ? 'false' : 'true',
+      };
+    },
+    montar(item, dados) {
+      const login = dados.login.trim().toLowerCase();
+
+      if (login.length < 3) {
+        throw new Error('O login deve ter pelo menos 3 caracteres.');
+      }
+
+      // O backend trata senha em branco como "manter a atual" (o record
+      // UsuarioEntrada converte "" em null). Mandar a string vazia e o que
+      // expressa essa intencao - por isso ela vai como veio.
+      const senha = dados.senha ?? '';
+      if (senha && senha.length < 12) {
+        throw new Error('A nova senha deve ter pelo menos 12 caracteres.');
+      }
+
+      return {
+        login,
+        nome: dados.nome.trim(),
+        senha,
+        perfil: dados.perfil,
+        ativo: dados.ativo === 'true',
       };
     },
   },
@@ -602,11 +925,24 @@ function construirCampoEdicao(campo, valorAtual) {
         itens: Object.entries(STATUS_LABEL).map(([v, t]) => ({ id: v, _txt: t })),
         txt: (s) => s._txt,
       },
+      'select-perfis': {
+        itens: Object.entries(PERFIL_LABEL).map(([v, t]) => ({ id: v, _txt: t })),
+        txt: (p) => p._txt,
+      },
+      // Sem placeholder: "Ativo"/"Desativado" nao tem estado neutro - deixar a
+      // opcao vazia permitiria salvar sem querer mudar a situacao.
+      'select-ativo': {
+        itens: [{ id: 'true', _txt: 'Ativo' }, { id: 'false', _txt: 'Desativado' }],
+        txt: (s) => s._txt,
+        semVazio: true,
+      },
     }[campo.tipo];
 
-    const vazio = el('option', null, 'Selecione…');
-    vazio.value = '';
-    input.append(vazio);
+    if (!origem.semVazio) {
+      const vazio = el('option', null, 'Selecione…');
+      vazio.value = '';
+      input.append(vazio);
+    }
 
     for (const it of origem.itens) {
       const opt = el('option', null, origem.txt(it));
@@ -624,6 +960,17 @@ function construirCampoEdicao(campo, valorAtual) {
       input.addEventListener('input', () => {
         const p = input.selectionStart;
         input.value = input.value.toUpperCase();
+        input.setSelectionRange(p, p);
+      });
+    }
+
+    // O login e gravado em minusculas pelo backend (UsuarioController faz
+    // trim().toLowerCase()). Espelhar aqui evita o usuario digitar "Ana" e ver
+    // depois "ana" na lista, achando que o sistema trocou o que ele escreveu.
+    if (campo.lower) {
+      input.addEventListener('input', () => {
+        const p = input.selectionStart;
+        input.value = input.value.toLowerCase();
         input.setSelectionRange(p, p);
       });
     }
@@ -673,12 +1020,17 @@ function abrirEdicao(recurso, item) {
   if (primeiro) primeiro.focus();
 }
 
+/** Todos os <dialog> da tela. Manter numa lista so evita esquecer um deles ao
+ *  adicionar outro - foi o que aconteceu quando o de desativacao entrou. */
+const DIALOGOS = ['#dialog-editar', '#dialog-excluir', '#dialog-desativar'];
+
 function fecharDialogos() {
-  for (const id of ['#dialog-editar', '#dialog-excluir']) {
+  for (const id of DIALOGOS) {
     const d = $(id);
     if (d?.open) d.close();
   }
   edicaoAtual = null;
+  desativacaoAtual = null;
 }
 
 async function initSalvarEdicao() {
@@ -760,15 +1112,42 @@ async function initConfirmarExclusao() {
     } catch (err) {
       // 409 = o backend recusou porque existem registros dependentes.
       fecharDialogos();
-      if (/409/.test(err.message)) {
-        toast(
-          'Não é possível excluir: existem registros ligados a este item. ' +
-          'Exclua primeiro os que dependem dele.',
-          'error', 9000
-        );
-      } else {
-        toast(err.message, 'error', 8000);
-      }
+      toast(err.message, 'error', err.status === 409 ? 9000 : 8000);
+    }
+  });
+}
+
+/* ---------- Desativar funcionario ---------- */
+
+let desativacaoAtual = null;
+
+function abrirDesativacao(usuario) {
+  desativacaoAtual = usuario;
+
+  $('#dialog-desativar-texto').textContent =
+    `Desativar o acesso de ${usuario.nome ?? usuario.login} (${usuario.login})? `
+    + 'O histórico dele é preservado, mas ele não conseguirá mais entrar, '
+    + 'e a sessão aberta cai na hora. Dá para reativar editando o cadastro.';
+
+  $('#dialog-desativar').showModal();
+  $('#btn-confirmar-desativacao').focus();
+}
+
+async function initConfirmarDesativacao() {
+  $('#btn-confirmar-desativacao').addEventListener('click', async () => {
+    if (!desativacaoAtual) return;
+    const usuario = desativacaoAtual;
+
+    try {
+      await withLoading($('#btn-confirmar-desativacao'), () =>
+        api(`${ENDPOINTS.funcionarios}/${usuario.id}`, { method: 'DELETE' }));
+
+      fecharDialogos();
+      toast(`Acesso de ${usuario.nome ?? usuario.login} desativado.`, 'ok');
+      await carregarTudo();
+    } catch (err) {
+      fecharDialogos();
+      toast(err.message, 'error', 9000);
     }
   });
 }
@@ -810,10 +1189,12 @@ function initFormAgendamento() {
     // O backend espera LocalDateTime sem timezone: "2026-11-05T09:30:00".
     const dataHora = `${data}T${hora}:00`;
 
-    const veiculo = state.veiculos.find((v) => String(v.id) === veiculoId);
-    const servico = state.servicos.find((s) => String(s.id) === servicoId);
+    // Confere que os ids escolhidos existem de fato nos dados carregados -
+    // validacao de UX; o backend valida de verdade.
+    const veiculoOk = state.veiculos.some((v) => String(v.id) === veiculoId);
+    const servicoOk = state.servicos.some((s) => String(s.id) === servicoId);
 
-    if (!veiculo || !servico) {
+    if (!veiculoOk || !servicoOk) {
       showHint('hint-agendamento', 'Veículo ou serviço inválido. Recarregue a página.', 'error');
       return;
     }
@@ -826,9 +1207,9 @@ function initFormAgendamento() {
         body: {
           dataHora,
           status: $('#ag-status').value,
-          // Enviar o objeto completo evita erro de desserializacao no @ManyToOne.
-          veiculo,
-          servico,
+          // So os ids: o backend resolve a entidade e calcula o preco.
+          veiculo: { id: Number(veiculoId) },
+          servico: { id: Number(servicoId) },
         },
       }));
 
@@ -895,7 +1276,7 @@ function initFormVeiculo() {
     evento.preventDefault();
 
     const clienteId = $('#ve-cliente').value;
-    const placa = $('#ve-placa').value.trim().toUpperCase();
+    const placa = $('#ve-placa').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
     const modelo = $('#ve-modelo').value.trim();
 
     const invalidos = [];
@@ -910,8 +1291,8 @@ function initFormVeiculo() {
       return;
     }
 
-    const cliente = state.clientes.find((c) => String(c.id) === clienteId);
-    if (!cliente) {
+    const clienteOk = state.clientes.some((c) => String(c.id) === clienteId);
+    if (!clienteOk) {
       showHint('hint-veiculo', 'Cliente inválido. Recarregue a página.', 'error');
       return;
     }
@@ -921,7 +1302,7 @@ function initFormVeiculo() {
     try {
       await withLoading($('#btn-veiculo'), () => api(ENDPOINTS.veiculos, {
         method: 'POST',
-        body: { placa, modelo, cliente },
+        body: { placa, modelo, cliente: { id: Number(clienteId) } },
       }));
 
       toast(`Veículo ${placa} cadastrado.`, 'ok');
@@ -989,6 +1370,72 @@ function initFormServico() {
   });
 }
 
+/** Cadastro de funcionario.
+ *
+ *  O minimo de 12 caracteres e do backend (UsuarioEntrada.@Size) e do
+ *  AdminInicialSeeder. Repetido aqui para avisar ANTES de enviar: o usuario nao
+ *  deveria descobrir a regra por um 400.
+ */
+function initFormFuncionario() {
+  const form = $('#form-funcionario');
+
+  // Login sempre em minusculas, igual ao que o backend grava.
+  $('#fu-login').addEventListener('input', (e) => {
+    const pos = e.target.selectionStart;
+    e.target.value = e.target.value.toLowerCase();
+    e.target.setSelectionRange(pos, pos);
+  });
+
+  form.addEventListener('submit', async (evento) => {
+    evento.preventDefault();
+
+    const nome   = $('#fu-nome').value.trim();
+    const login  = $('#fu-login').value.trim().toLowerCase();
+    const senha  = $('#fu-senha').value;
+    const perfil = $('#fu-perfil').value;
+
+    const invalidos = [];
+    if (!nome)   invalidos.push('fu-nome');
+    if (!login)  invalidos.push('fu-login');
+    if (!senha)  invalidos.push('fu-senha');
+
+    setInvalid(form, invalidos);
+
+    if (invalidos.length) {
+      showHint('hint-funcionario', 'Preencha os campos obrigatórios (*).', 'error');
+      return;
+    }
+
+    if (login.length < 3) {
+      setInvalid(form, ['fu-login']);
+      showHint('hint-funcionario', 'O login deve ter pelo menos 3 caracteres.', 'error');
+      return;
+    }
+
+    if (senha.length < 12) {
+      setInvalid(form, ['fu-senha']);
+      showHint('hint-funcionario', 'A senha deve ter pelo menos 12 caracteres.', 'error');
+      return;
+    }
+
+    showHint('hint-funcionario', '');
+
+    try {
+      await withLoading($('#btn-funcionario'), () => api(ENDPOINTS.funcionarios, {
+        method: 'POST',
+        body: { login, senha, nome, perfil },
+      }));
+
+      toast(`Funcionário "${nome}" cadastrado.`, 'ok');
+      form.reset();
+      await carregarTudo();
+    } catch (err) {
+      showHint('hint-funcionario', err.message, 'error');
+      toast(err.message, 'error', 8000);
+    }
+  });
+}
+
 /* ---------- Tabs ---------- */
 
 function initTabs() {
@@ -1030,6 +1477,185 @@ function initTabs() {
   if (inicial) ativar(inicial, false);
 }
 
+/* ---------- Perfis ---------- */
+
+/** Extrai apenas os perfis de dominio do que a API devolve.
+ *
+ *  A API manda authorities do Spring Security ("ROLE_ADMIN"). Filtramos o
+ *  prefixo ROLE_ e ignoramos qualquer outra authority interna (o Spring as
+ *  vezes inclui marcadores como FACTOR_*), que nao representam perfil de
+ *  usuario e nao devem influenciar o que a tela mostra. */
+function perfisDe(usuario) {
+  return (usuario?.perfis ?? [])
+    .filter((p) => typeof p === 'string' && p.startsWith('ROLE_'))
+    .map((p) => p.slice('ROLE_'.length));
+}
+
+/** O usuario logado e ADMIN? */
+function ehAdmin() {
+  return perfisDe(state.usuario).includes('ADMIN');
+}
+
+/* ---------- Tela de login x painel ---------- */
+
+function mostrarTelaLogin(mensagem) {
+  $('#tela-login').hidden = false;
+  $('#app').hidden = true;
+  $('#topbar-user').hidden = true;
+  $('#btn-sair').hidden = true;
+  $('#status-text').textContent = 'Aguardando login';
+
+  const hint = $('#hint-login');
+  if (mensagem) {
+    hint.textContent = mensagem;
+    hint.hidden = false;
+  } else {
+    hint.hidden = true;
+  }
+
+  $('#login-senha').value = '';
+  $('#login-usuario').focus();
+}
+
+function mostrarPainel(usuario) {
+  state.usuario = usuario;
+
+  $('#tela-login').hidden = true;
+  $('#app').hidden = false;
+  $('#hint-login').hidden = true;
+
+  const nome = usuario.login ?? '';
+  $('#usuario-nome').textContent = nome;
+  $('#usuario-perfil').textContent = perfisDe(usuario).join(' · ') || '—';
+  $('#topbar-user').hidden = false;
+  $('#btn-sair').hidden = false;
+
+  ajustarAbasPorPerfil();
+  renderTudo();
+  renovarInatividade();
+  carregarTudo();
+}
+
+/** Mostra a aba Funcionários apenas para ADMIN.
+ *
+ *  E so apresentacao: quem chamar /api/usuarios na mao recebe 403 do
+ *  SecurityConfig. Mas esconder importa - um atendente clicando numa aba que
+ *  responde 403 concluiria que o sistema esta quebrado.
+ *
+ *  Ao esconder, tambem devolve a aba ativa para Agendamentos se ela estava
+ *  aberta: um painel visivel cuja aba sumiu deixaria a tela muda, sem jeito
+ *  obvio de voltar. */
+function ajustarAbasPorPerfil() {
+  const tab = $('#tab-funcionarios');
+  const painel = $('#panel-funcionarios');
+  if (!tab || !painel) return;
+
+  const admin = ehAdmin();
+  tab.hidden = !admin;
+  if (admin) return;
+
+  if (!painel.hidden) {
+    const agendamentos = $('#tab-agendamentos');
+    if (agendamentos) agendamentos.click();
+  }
+  painel.hidden = true;
+}
+
+/** Preenche a tela conforme a sessao que o servidor reconhece.
+ *  E o servidor quem decide: nao confiamos em nada guardado no navegador. */
+async function iniciarSessao() {
+  await garantirTokenCsrf();
+
+  if (!temSessao()) {
+    mostrarTelaLogin();
+    return;
+  }
+
+  try {
+    const usuario = await api(AUTH.me);
+    mostrarPainel(usuario);
+  } catch (err) {
+    // 401 aqui e normal: cookie velho de uma sessao que o servidor ja esqueceu.
+    if (err.status === 401 || err.status === 403) {
+      mostrarTelaLogin();
+    } else {
+      mostrarTelaLogin('Não foi possível conectar. Tente novamente.');
+    }
+  }
+}
+
+/* ---------- Login / logout ---------- */
+
+function initFormLogin() {
+  $('#form-login').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const login = $('#login-usuario').value.trim();
+    const senha = $('#login-senha').value;
+    const hint = $('#hint-login');
+
+    if (!login || !senha) {
+      hint.textContent = 'Preencha usuário e senha.';
+      hint.hidden = false;
+      return;
+    }
+
+    hint.hidden = true;
+
+    try {
+      await withLoading($('#btn-entrar'), () => api(AUTH.login, {
+        method: 'POST',
+        // A senha vai so nesta chamada e nunca e guardada em lugar nenhum.
+        body: { login, senha },
+      }));
+
+      $('#form-login').reset();
+
+      // Novos cookies (sessao + CSRF) chegaram; recarrega para saber quem entrou.
+      const usuario = await api(AUTH.me);
+      mostrarPainel(usuario);
+      toast(`Bem-vindo, ${usuario.login}.`, 'ok');
+    } catch (err) {
+      // 401 no login e credencial errada, nao sessao expirada: nao redireciona.
+      hint.textContent = err.status === 401
+        ? 'Usuário ou senha inválidos.'
+        : err.message;
+      hint.hidden = false;
+      $('#login-senha').value = '';
+      $('#login-senha').focus();
+    }
+  });
+}
+
+/** Sai da sessao. `motivo` (opcional) aparece na tela de login.
+ *  Encerra no SERVIDOR primeiro: se so limpassemos a tela, o cookie continuaria
+ *  valido e um F5 traria o usuario de volta logado. */
+async function sair(motivo) {
+  try {
+    // O logout e POST e esta sob /api/**, entao o backend exige o token CSRF.
+    // Sem o header o servidor responde 403 e a sessao continua viva.
+    await api(AUTH.logout, { method: 'POST' });
+  } catch {
+    // Se falhou (rede caiu, sessao ja expirou), seguimos com a saida local:
+    // o usuario pediu para sair, nao vamos prende-lo na tela.
+  } finally {
+    state.usuario = null;
+    limparEstado();
+    clearTimeout(temporizadorInatividade);
+    $('#tela-login').hidden = false;
+    $('#app').hidden = true;
+    $('#topbar-user').hidden = true;
+    $('#btn-sair').hidden = true;
+    $('#form-login').reset();
+    const hint = $('#hint-login');
+    if (motivo) {
+      hint.textContent = motivo;
+      hint.hidden = false;
+    }
+    $('#login-usuario').focus();
+  }
+}
+
 /* ---------- Init ---------- */
 
 function initDialogos() {
@@ -1039,13 +1665,15 @@ function initDialogos() {
   });
 
   // <dialog> ja fecha no Esc; so precisamos limpar o estado junto.
-  for (const id of ['#dialog-editar', '#dialog-excluir']) {
+  for (const id of DIALOGOS) {
     const d = $(id);
-    if (d) d.addEventListener('close', () => { edicaoAtual = null; exclusaoAtual = null; });
+    if (d) d.addEventListener('close', () => {
+      edicaoAtual = null; exclusaoAtual = null; desativacaoAtual = null;
+    });
   }
 
   // Clicar no backdrop (fora da caixa) fecha.
-  for (const id of ['#dialog-editar', '#dialog-excluir']) {
+  for (const id of DIALOGOS) {
     const d = $(id);
     if (!d) continue;
     d.addEventListener('click', (e) => {
@@ -1054,27 +1682,58 @@ function initDialogos() {
   }
 }
 
+function initTema() {
+  const raiz = document.documentElement;
+  try { const salvo = localStorage.getItem('tema'); if (salvo) raiz.dataset.theme = salvo; } catch { /* sem storage */ }
+
+  $('#theme-toggle').addEventListener('click', () => {
+    const escuro = raiz.dataset.theme
+      ? raiz.dataset.theme === 'dark'
+      : matchMedia('(prefers-color-scheme: dark)').matches;
+    raiz.dataset.theme = escuro ? 'light' : 'dark';
+    try { localStorage.setItem('tema', raiz.dataset.theme); } catch { /* sem storage */ }
+  });
+}
+
 function init() {
+  initTema();
   initTabs();
+  initFormLogin();
   initFormAgendamento();
   initFormCliente();
   initFormVeiculo();
   initFormServico();
+  initFormFuncionario();
   initDialogos();
   initSalvarEdicao();
   initConfirmarExclusao();
+  initConfirmarDesativacao();
+
+  $('#btn-sair').addEventListener('click', () => sair());
 
   $('#filtro-status').addEventListener('change', (e) => {
     state.filtroStatus = e.target.value;
     renderAgendamentos();
   });
 
-  carregarTudo();
-
-  // Revalida ao voltar para a aba (dados podem ter mudado no banco).
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) carregarTudo();
+  $('#filtro-periodo').addEventListener('change', (e) => {
+    state.filtroPeriodo = e.target.value;
+    renderAgendamentos();
   });
+
+  // Qualquer interacao conta como atividade e adia o logout por inatividade.
+  for (const evento of ['click', 'keydown', 'pointerdown']) {
+    document.addEventListener(evento, renovarInatividade, { passive: true });
+  }
+
+  // Revalida ao voltar para a aba (dados e sessao podem ter mudado).
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    renovarInatividade();
+    if (state.usuario) carregarTudo();
+  });
+
+  iniciarSessao();
 }
 
 if (document.readyState === 'loading') {

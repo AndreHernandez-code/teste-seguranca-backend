@@ -1,14 +1,22 @@
 package br.com.lavajato.model;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
+/**
+ * Persistencia de agendamento. As regras de validacao vivem no DTO de entrada
+ * (dto/AgendamentoDto). Repare que "precoCobrado" nao aparece la: ele e sempre
+ * calculado pelo servidor a partir do servico escolhido.
+ */
 @Entity
 public class Agendamento {
 
@@ -17,7 +25,12 @@ public class Agendamento {
     private Long id;
 
     private LocalDateTime dataHora;
-    private String status;
+
+    @Enumerated(EnumType.STRING)
+    private StatusAgendamento status;
+
+    /** Preço no momento do agendamento: mudar o preço do serviço depois não altera o histórico. */
+    private BigDecimal precoCobrado;
 
     @ManyToOne
     @JoinColumn(name = "veiculo_id")
@@ -43,12 +56,20 @@ public class Agendamento {
         this.dataHora = dataHora;
     }
 
-    public String getStatus() {
+    public StatusAgendamento getStatus() {
         return status;
     }
 
-    public void setStatus(String status) {
+    public void setStatus(StatusAgendamento status) {
         this.status = status;
+    }
+
+    public BigDecimal getPrecoCobrado() {
+        return precoCobrado;
+    }
+
+    public void setPrecoCobrado(BigDecimal precoCobrado) {
+        this.precoCobrado = precoCobrado;
     }
 
     public Veiculo getVeiculo() {

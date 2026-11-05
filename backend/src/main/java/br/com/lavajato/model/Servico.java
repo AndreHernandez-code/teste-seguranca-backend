@@ -7,6 +7,10 @@ import jakarta.persistence.Id;
 
 import java.math.BigDecimal;
 
+/**
+ * Persistencia de servico. As regras de validacao vivem no DTO de entrada
+ * (dto/ServicoDto), nao aqui - ver a nota em Cliente.
+ */
 @Entity
 public class Servico {
 
@@ -15,7 +19,9 @@ public class Servico {
     private Long id;
 
     private String nome;
+
     private BigDecimal preco;
+
     private Integer tempoEstimado;
 
     public Long getId() {

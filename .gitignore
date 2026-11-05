@@ -1,0 +1,89 @@
+# =============================================================================
+# .gitignore da RAIZ do repositorio.
+# =============================================================================
+#
+# POR QUE ESTE ARQUIVO EXISTE (Etapa 7)
+#
+# O backend/.gitignore ja cobria o backend. O problema era o resto: um
+# "git add ." na raiz levaria junto 2.463 arquivos de node_modules e o
+# "projeto lavajato.rar" de 54 MB - medido, nao estimado.
+#
+# O .gitignore de uma subpasta so vale para dentro dela. Sem este arquivo, tudo
+# que esta FORA de backend/ estava desprotegido.
+#
+# O CUSTO DE NAO TER ISSO
+#
+# Um commit com node_modules nao e "so um pouco maior": sao 2463 arquivos no
+# historico para sempre. Tirar depois NAO resolve - o conteudo continua no
+# historico e quem clonar baixa tudo. E o .rar tem o mesmo problema, agravado
+# por poder conter dado real do sistema.
+
+# -----------------------------------------------------------------------------
+# Dependencias instaladas
+# -----------------------------------------------------------------------------
+# node_modules e derivado do package.json: qualquer um reinstala com
+# "npm install". Versionar nao ajuda ninguem e polui toda revisao de codigo -
+# um diff em que aparece "adiciona 2463 arquivos" esconde as mudancas de
+# verdade.
+node_modules/
+**/node_modules/
+
+# -----------------------------------------------------------------------------
+# Build / artefatos
+# -----------------------------------------------------------------------------
+target/
+build/
+dist/
+out/
+*.class
+
+# -----------------------------------------------------------------------------
+# Backups e arquivos compactados
+# -----------------------------------------------------------------------------
+# O ".rar" do projeto (54 MB) e um backup manual. Alem do tamanho, um backup
+# costuma carregar junto o que nao devia: .env, log, dump de banco. Se um dia
+# precisar guardar backup no repositorio, que seja um lugar proprio para isso,
+# nao o historico do Git.
+*.rar
+*.zip
+*.7z
+*.tar
+*.tar.gz
+
+# -----------------------------------------------------------------------------
+# Segredos e ambiente
+# -----------------------------------------------------------------------------
+# Mesma regra do backend/.gitignore, repetida aqui porque este arquivo e o que
+# vale na raiz: o .env guarda DB_PASSWORD e ADMIN_SENHA. Se entrar no
+# repositorio, trocar a senha depois NAO apaga o que ja foi commitado.
+.env
+.env.*
+!.env.example
+
+# -----------------------------------------------------------------------------
+# Logs
+# -----------------------------------------------------------------------------
+logs/
+*.log
+
+# -----------------------------------------------------------------------------
+# Copias e pastas de trabalho
+# -----------------------------------------------------------------------------
+# Pastas que aparecem como copia/experimento do projeto (versaomelhorada/,
+# frontend/frontend/). Sao trabalho local: enquanto nao houver uma decisao
+# explicita de incorporar, ficam de fora para nao virarem duas versoes do
+# mesmo sistema dentro do repositorio.
+versaomelhorada/
+frontend/frontend/
+
+# -----------------------------------------------------------------------------
+# Sistema operacional e editores
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+
+.idea/
+*.iml
+.vscode/

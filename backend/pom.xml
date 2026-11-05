@@ -38,6 +38,14 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -50,14 +58,65 @@
 			<artifactId>postgresql</artifactId>
 			<scope>runtime</scope>
 		</dependency>
+
+		<!--
+			Flyway - Etapa 6. Substitui o ddl-auto=update do Hibernate.
+
+			Por que: com "update", e o Hibernate que decide o que mudar no banco a
+			cada subida. Ele adiciona coluna, mas NUNCA remove nem altera tipo -
+			entao o schema real vai divergindo do que as entidades descrevem, e a
+			divergencia so aparece quando algo quebra em producao. Pior: numa
+			base com dado real, uma alteracao de tipo que o Hibernate resolva
+			aplicar sozinho pode perder dado.
+
+			Com o Flyway, cada mudanca de schema e um arquivo SQL versionado,
+			revisavel e com ordem definida. O ddl-auto passa a "validate": a
+			aplicacao confere que o banco bate com as entidades e RECUSA subir se
+			nao bater - falha cedo, no deploy, e nao no meio do expediente.
+
+			ARMADILHA (custou uma depuracao): no Spring Boot 4 a
+			autoconfiguracao do Flyway NAO esta mais no spring-boot-autoconfigure,
+			como estava no Boot 3 - ela foi para o modulo spring-boot-flyway. Com
+			apenas o flyway-core no classpath, nada acontece: o Flyway nao roda,
+			nenhuma migracao e aplicada, e o erro que aparece e OUTRO (o
+			ddl-auto=validate reclamando "missing table"), o que despista. Usar o
+			starter e o que traz o modulo de autoconfiguracao junto.
+
+			A versao e gerenciada pelo parent do Spring Boot; nao fixar aqui.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-flyway</artifactId>
+		</dependency>
+		<!--
+			Suporte ao PostgreSQL. A partir do Flyway 10, cada banco virou um
+			modulo separado e o flyway-core sozinho NAO conhece mais o Postgres -
+			sem isto a subida falha com "Unsupported Database: PostgreSQL 18.6",
+			mesmo com tudo o mais certo.
+		-->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 		<dependency>
+			<groupId>com.h2database</groupId>
+			<artifactId>h2</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

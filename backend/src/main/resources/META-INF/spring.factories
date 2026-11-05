@@ -1,0 +1,21 @@
+# =============================================================================
+# Registro de EnvironmentPostProcessor.
+# =============================================================================
+#
+# O Spring descobre a classe por este arquivo, e nao por anotacao.
+#
+# A chave abaixo e a do Boot 4.1. O Spring Framework 7 tambem procura a variante
+# em META-INF/spring/<chave>.imports; aqui ficou o spring.factories porque a
+# classe nao tem condicional nenhuma (ela mesma decide, lendo
+# app.banco.criar-se-faltar) e um registro so e mais facil de achar depois.
+#
+# SO EXISTE UM ITEM AQUI, e ele e o CriadorDeBanco. Se um dia entrar outro,
+# mantenha os dois na mesma chave separados por virgula.
+#
+# POR QUE ISTO IMPORTA PARA O PACOTE DE TESTE
+#
+# Sem este arquivo, o CriadorDeBanco simplesmente nao roda - sem erro, sem
+# aviso. O INICIAR.bat depende dele para criar o banco numa maquina nova, e a
+# falha apareceria como "database does not exist", que nao aponta para a causa.
+org.springframework.boot.env.EnvironmentPostProcessor=\
+br.com.lavajato.security.CriadorDeBanco

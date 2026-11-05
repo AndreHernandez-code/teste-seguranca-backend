@@ -5,6 +5,11 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 
+/**
+ * Persistencia de cliente. As regras de validacao NAO ficam aqui: elas vivem
+ * no DTO de entrada (dto/ClienteDto). A entidade e o formato do banco, nao o
+ * contrato da API - misturar os dois fazia a validacao depender de quem grava.
+ */
 @Entity
 public class Cliente {
 
@@ -21,6 +26,7 @@ public class Cliente {
     }
 
     private String nome;
+
     private String telefone;
 
     public String getTelefone() {
@@ -38,5 +44,4 @@ public class Cliente {
     public void setNome(String nome) {
         this.nome = nome;
     }
-// Use o atalho Alt + Insert no IntelliJ e selecione "Getter and Setter" para gerar os métodos automaticamente
 }

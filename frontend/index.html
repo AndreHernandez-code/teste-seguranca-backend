@@ -23,16 +23,53 @@
     <div class="topbar__status">
       <span id="status-dot" class="dot dot--idle" aria-hidden="true"></span>
       <span id="status-text" role="status" aria-live="polite">Conectando&hellip;</span>
+
+      <!-- Usuario logado + sair. Ficam escondidos ate sabermos quem esta na sessao. -->
+      <span class="topbar__user" id="topbar-user" hidden>
+        <span id="usuario-nome"></span>
+        <span class="badge" id="usuario-perfil"></span>
+      </span>
+      <button type="button" class="btn btn--ghost btn--sm" id="btn-sair" hidden>Sair</button>
+
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Alternar tema claro/escuro" title="Alternar tema">&#9680;</button>
     </div>
   </header>
 
-  <main class="layout">
+  <!-- ================= TELA DE LOGIN ================= -->
+  <!-- Fica FORA do <main class="layout">: quando o usuario nao esta logado,
+       o layout inteiro some e so esta tela aparece. -->
+  <section class="login" id="tela-login" hidden>
+    <form class="login__card" id="form-login" novalidate>
+      <h2 class="login__title">Entrar</h2>
+      <p class="login__sub">Acesso restrito a funcionarios.</p>
+
+      <div class="field">
+        <label for="login-usuario">Usuário</label>
+        <input type="text" id="login-usuario" name="login" autocomplete="username"
+               autocapitalize="none" spellcheck="false" required autofocus>
+      </div>
+
+      <div class="field">
+        <label for="login-senha">Senha</label>
+        <input type="password" id="login-senha" name="senha" autocomplete="current-password" required>
+      </div>
+
+      <p class="hint" id="hint-login" hidden></p>
+
+      <button type="submit" class="btn btn--primary" id="btn-entrar">Entrar</button>
+    </form>
+  </section>
+
+  <main class="layout" id="app" hidden>
 
     <nav class="tabs" role="tablist" aria-label="Seções">
       <button class="tab" role="tab" id="tab-agendamentos" aria-controls="panel-agendamentos" aria-selected="true" data-panel="agendamentos">Agendamentos</button>
       <button class="tab" role="tab" id="tab-clientes" aria-controls="panel-clientes" aria-selected="false" tabindex="-1" data-panel="clientes">Clientes</button>
       <button class="tab" role="tab" id="tab-veiculos" aria-controls="panel-veiculos" aria-selected="false" tabindex="-1" data-panel="veiculos">Veículos</button>
       <button class="tab" role="tab" id="tab-servicos" aria-controls="panel-servicos" aria-selected="false" tabindex="-1" data-panel="servicos">Serviços</button>
+      <!-- So aparece para ADMIN: o init esconde para os demais perfis.
+           O gating de verdade esta no SecurityConfig (/api/usuarios exige ADMIN). -->
+      <button class="tab" role="tab" id="tab-funcionarios" aria-controls="panel-funcionarios" aria-selected="false" tabindex="-1" data-panel="funcionarios" hidden>Funcionários</button>
     </nav>
 
     <!-- ================= AGENDAMENTOS ================= -->
@@ -102,6 +139,14 @@
         <article class="card card--wide">
           <div class="card__head">
             <h2 class="card__title">Agenda</h2>
+            <div class="field field--inline">
+              <label for="filtro-periodo" class="sr-only">Filtrar por período</label>
+              <select id="filtro-periodo">
+                <option value="">Todo o período</option>
+                <option value="hoje">Hoje</option>
+                <option value="semana">Próximos 7 dias</option>
+              </select>
+            </div>
             <div class="field field--inline">
               <label for="filtro-status" class="sr-only">Filtrar por status</label>
               <select id="filtro-status">
@@ -276,6 +321,65 @@
       </div>
     </section>
 
+    <!-- ================= FUNCIONÁRIOS ================= -->
+    <section class="panel" id="panel-funcionarios" role="tabpanel" aria-labelledby="tab-funcionarios" hidden>
+      <div class="grid">
+        <article class="card">
+          <h2 class="card__title">Novo funcionário</h2>
+
+          <form id="form-funcionario" class="form" novalidate>
+            <div class="field">
+              <label for="fu-nome">Nome <span class="req" aria-hidden="true">*</span></label>
+              <input type="text" id="fu-nome" name="nome" placeholder="Ex.: Ana Souza" autocomplete="off" required>
+            </div>
+
+            <div class="field">
+              <label for="fu-login">Login <span class="req" aria-hidden="true">*</span></label>
+              <input type="text" id="fu-login" name="login" placeholder="Ex.: ana.souza"
+                     autocomplete="off" autocapitalize="none" spellcheck="false" required>
+            </div>
+
+            <div class="field">
+              <label for="fu-senha">Senha <span class="req" aria-hidden="true">*</span></label>
+              <input type="password" id="fu-senha" name="senha" autocomplete="new-password" required>
+              <p class="field__help" id="fu-senha-ajuda">Mínimo de 12 caracteres.</p>
+            </div>
+
+            <div class="field">
+              <label for="fu-perfil">Perfil <span class="req" aria-hidden="true">*</span></label>
+              <select id="fu-perfil" name="perfil" required>
+                <option value="ATENDENTE">Atendente</option>
+                <option value="ADMIN">Administrador</option>
+              </select>
+            </div>
+
+            <button type="submit" class="btn btn--primary" id="btn-funcionario">Cadastrar</button>
+          </form>
+
+          <p class="hint" id="hint-funcionario" hidden></p>
+        </article>
+
+        <article class="card card--wide">
+          <h2 class="card__title">Equipe</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Nome</th>
+                  <th scope="col">Login</th>
+                  <th scope="col">Perfil</th>
+                  <th scope="col">Situação</th>
+                  <th scope="col" class="acoes-col">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-funcionarios"></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
   </main>
 
   <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
@@ -311,6 +415,22 @@
     <footer class="dialog__foot">
       <button type="button" class="btn btn--ghost" data-fechar>Cancelar</button>
       <button type="button" class="btn btn--danger" id="btn-confirmar-exclusao">Excluir</button>
+    </footer>
+  </dialog>
+
+  <!-- ================= DIALOG: DESATIVAR FUNCIONÁRIO ================= -->
+  <dialog class="dialog dialog--sm" id="dialog-desativar" aria-labelledby="dialog-desativar-titulo">
+    <header class="dialog__head">
+      <h2 class="dialog__title" id="dialog-desativar-titulo">Desativar acesso</h2>
+    </header>
+
+    <div class="dialog__body">
+      <p id="dialog-desativar-texto"></p>
+    </div>
+
+    <footer class="dialog__foot">
+      <button type="button" class="btn btn--ghost" data-fechar>Cancelar</button>
+      <button type="button" class="btn btn--danger" id="btn-confirmar-desativacao">Desativar</button>
     </footer>
   </dialog>
 

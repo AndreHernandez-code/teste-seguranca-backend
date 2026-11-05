@@ -31,3 +31,18 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Logs (Etapa 5) ###
+# O log da aplicacao (logs/lavajato.log e as rotacoes). Nunca versionar:
+# contem login de usuario, IP de origem e stack trace de erro - e cresce
+# sozinho, entao viraria um arquivo enorme no repositorio.
+logs/
+*.log
+
+### Segredos (Etapa 7) ###
+# Arquivo de variaveis de ambiente usado para rodar localmente. Guarda
+# DB_PASSWORD e ADMIN_SENHA; se entrar no repositorio, a senha vaza no
+# historico do git e trocar depois nao apaga o passado.
+.env
+.env.*
+!.env.example

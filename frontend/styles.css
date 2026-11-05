@@ -295,6 +295,14 @@ h1, h2, h3 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 
 .req { color: var(--danger); }
 
+/* Texto de apoio sob o campo (ex.: "Mínimo de 12 caracteres."). Cinza e menor
+   que o label para nao competir com ele. */
+.field__help {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ink-3);
+}
+
 .field input,
 .field select {
   width: 100%;
@@ -454,6 +462,16 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 .badge--em_andamento { background: var(--brand-soft);  color: var(--brand-ink); }
 .badge--concluido    { background: var(--ok-soft);     color: var(--ok); }
 .badge--cancelado    { background: var(--danger-soft); color: var(--danger); }
+
+/* Situacao do funcionario. */
+.badge--ativo   { background: var(--ok-soft);     color: var(--ok); }
+.badge--inativo { background: var(--surface-2);   color: var(--ink-3);
+                  border: 1px solid var(--line); }
+
+/* Linha de quem foi desativado: continua visivel (o historico importa), mas
+   em segundo plano visual. */
+.table tbody tr.row--inativo td { color: var(--ink-3); }
+.table tbody tr.row--inativo .cell-strong { font-weight: 500; }
 
 /* ---------- Coluna de acoes ---------- */
 .acoes-col { width: 1%; white-space: nowrap; }
@@ -696,4 +714,182 @@ td.acoes {
   .grid { grid-template-columns: 1fr; }
   body { background: #fff; }
   .card { border: 0; box-shadow: none; padding: 0; }
+}
+
+/* ============================================================
+   Refresh visual + tema manual
+   ============================================================ */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+    --bg:        #0d1117;
+    --surface:   #161b24;
+    --surface-2: #1c2230;
+    --ink:       #e8edf5;
+    --ink-2:     #a7b2c2;
+    --ink-3:     #6e7a8c;
+    --line:      #2a3240;
+    --brand:     #5b9dff;
+    --brand-ink: #7db0ff;
+    --brand-soft:#16273f;
+    --ok:        #4ade9f;
+    --ok-soft:   #10301f;
+    --warn:      #f0c14b;
+    --warn-soft: #33290c;
+    --danger:    #ff8a80;
+    --danger-soft:#3a1a17;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-md: 0 4px 12px rgb(0 0 0 / 45%);
+    --shadow-lg: 0 12px 32px rgb(0 0 0 / 55%);
+}
+:root[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+:root[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator { filter: invert(1); }
+
+:root { --brand-2: #0ea5e9; --r-lg: 18px; }
+
+body {
+  background:
+    radial-gradient(1100px 480px at 90% -12%, color-mix(in srgb, var(--brand) 16%, transparent), transparent 62%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+.topbar {
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+}
+.topbar__mark {
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 40%, transparent);
+}
+
+.theme-toggle {
+  width: 34px; height: 34px;
+  margin-left: 6px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color .15s, color .15s;
+}
+.theme-toggle:hover { background: var(--surface-2); color: var(--ink); }
+
+.tab[aria-selected="true"] {
+  background: linear-gradient(135deg, var(--brand), var(--brand-2));
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--brand) 35%, transparent);
+}
+
+.card { border-radius: var(--r-lg); transition: box-shadow .2s; }
+.card:hover { box-shadow: var(--shadow-md); }
+
+.stat { position: relative; overflow: hidden; padding-left: 22px; }
+.stat::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: var(--accent, var(--brand));
+}
+.stat:nth-child(2) { --accent: var(--warn); }
+.stat:nth-child(3) { --accent: var(--ok); }
+.stat__value { font-size: 1.75rem; }
+
+.card__head { flex-wrap: wrap; gap: 10px; }
+.card__head .card__title { margin-right: auto; }
+
+.table tbody tr { transition: background-color .12s; }
+.table tbody tr:hover td { background: var(--surface-2); }
+
+.badge::before {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+}
+
+.icon-btn--ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.icon-btn--ok:hover { background: var(--ok-soft); }
+
+/* ============================================================
+   Login e usuario logado
+   ============================================================ */
+
+/* O atributo `hidden` do HTML vale apenas enquanto ninguem declara `display`
+   para o elemento: qualquer `display:` no CSS vence o `hidden` do navegador, e
+   o elemento continua aparecendo. Regra explicita aqui para que `hidden` ganhe
+   sempre - sem ela, telas escondidas pelo JS (como a de login apos entrar, ou
+   os paineis de aba) ficavam visiveis por baixo do painel. */
+[hidden] { display: none !important; }
+
+/* Tela de login: ocupa a altura toda e centraliza o cartao.
+   Fica escondida por padrao; o app.js decide qual das duas telas mostrar. */
+.login {
+  min-height: calc(100vh - 72px);
+  display: grid;
+  place-items: center;
+  padding: var(--pad) 16px;
+}
+
+.login__card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.login__title {
+  margin: 0;
+  font-size: 1.4rem;
+  letter-spacing: -0.01em;
+}
+
+.login__sub {
+  margin: -8px 0 4px;
+  color: var(--ink-2);
+  font-size: 0.9rem;
+}
+
+/* O botao de entrar e largo como os campos, e nao encolhe no flex. */
+.login__card .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* Identificacao do usuario na barra do topo. */
+.topbar__user {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-2);
+  font-size: 0.88rem;
+}
+
+.topbar__user #usuario-nome {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.btn--sm {
+  padding: 5px 12px;
+  font-size: 0.83rem;
+}
+
+/* Em telas estreitas escondemos o nome e deixamos so o perfil,
+   para a barra do topo nao quebrar em duas linhas. */
+@media (max-width: 560px) {
+  .topbar__user #usuario-nome { display: none; }
+  .topbar__user { gap: 0; }
 }

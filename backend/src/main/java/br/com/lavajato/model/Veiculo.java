@@ -7,6 +7,10 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 
+/**
+ * Persistencia de veiculo. As regras de validacao (inclusive o padrao da
+ * placa) vivem no DTO de entrada (dto/VeiculoDto), nao aqui.
+ */
 @Entity
 public class Veiculo {
 
@@ -15,6 +19,7 @@ public class Veiculo {
     private Long id;
 
     private String placa;
+
     private String modelo;
 
     @ManyToOne
