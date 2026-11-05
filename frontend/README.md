@@ -17,9 +17,12 @@ Sem build, sem dependências: é só HTML, CSS e JS puros.
 
 ### Opção 1 — pelo próprio Spring Boot (recomendado)
 
-Copia esta pasta para `backend/src/main/resources/static/` e sobe o backend.
-Acesse **http://localhost:8080** — frontend e API na mesma origem, então
-não há CORS envolvido.
+Copia esta pasta para `backend/src/main/resources/static/` e sobe o backend
+(ou use o `INICIAR.bat` na raiz do projeto, que já faz isso).
+Acesse **http://localhost:8080** — frontend e API na mesma origem.
+
+> ℹ️ As duas cópias (`frontend/` e `backend/src/main/resources/static/`) devem
+> ficar idênticas. Ao editar o frontend, sincronize as duas.
 
 ### Opção 2 — com um servidor estático
 
@@ -37,21 +40,30 @@ python -m http.server 5500
 
 Com VS Code, use a extensão **Live Server** (porta 5500).
 
-Acesse **http://localhost:5500**. O `app.js` detecta a porta e aponta
-automaticamente para `http://localhost:8080`.
+Acesse **http://localhost:5500** e aponte o `app.js` para a API definindo
+`window.API_BASE` **antes** de carregar o `app.js`:
+
+```html
+<script>window.API_BASE = 'http://localhost:8080';</script>
+<script src="app.js"></script>
+```
+
+Sem isso, o `app.js` assume a mesma origem (`''`) e as requisições irão
+para a porta do servidor estático — que não tem a API.
 
 ## CORS
 
-O backend já libera as portas mais comuns (5500, 5173, 8080) através de
-`backend/src/main/java/br/com/lavajato/config/CorsConfig.java`.
-Para ajustar, edite a propriedade em `application.properties`:
+**O backend NÃO habilita CORS.** Não existe `CorsConfig.java` nem a
+propriedade `app.cors.allowed-origins`; o Spring Security também não abre
+CORS. Isso é intencional: o app é *same-origin* (o frontend é servido pelo
+próprio backend na porta 8080).
 
-```properties
-app.cors.allowed-origins=http://localhost:5500,http://localhost:5173
-```
+**Consequência prática:** se você servir o frontend em **outra origem/porta**
+(Opção 2), o navegador vai **bloquear** as chamadas à API por CORS e o
+`window.API_BASE` sozinho **não resolve** — o backend precisa permitir a origem.
 
-Se você servir o frontend por outra porta, adicione-a nessa lista —
-caso contrário o navegador vai bloquear as requisições.
+Para usar a Opção 2 de verdade, é preciso adicionar configuração de CORS no
+backend (não existe hoje). Enquanto isso, prefira a **Opção 1**.
 
 ## O que a interface faz
 

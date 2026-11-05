@@ -10,6 +10,7 @@ import br.com.lavajato.validation.GruposValidacao;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import jakarta.validation.groups.Default;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -126,9 +127,27 @@ public class UsuarioController {
         return UsuarioSaida.de(usuarios.save(novo));
     }
 
+    /**
+     * Edicao de funcionario.
+     *
+     * ATENCAO ao grupo de validacao (corrigido em auditoria): o @Validated
+     * precisa incluir Default.class ALEM de Edicao.class.
+     *
+     * Motivo: as constraints de LOGIN, NOME e PERFIL nao declaram "groups" -
+     * logo pertencem ao grupo Default. Ao validar SOMENTE Edicao.class (como
+     * estava antes), o Bean Validation NAO inclui Default automaticamente
+     * (Edicao e uma interface vazia, nao estende Default), e essas constraints
+     * deixavam de ser avaliadas no PUT. Consequencia real: "perfil": null
+     * passava pela validacao, e o metodo seguiria com um perfil nulo -
+     * disparando ora uma violacao de NOT NULL no banco (409/500), ora um
+     * tratamento incorreto na checagem do ultimo admin.
+     *
+     * O que dispensamos na edicao e apenas o @NotBlank da SENHA (grupo Criacao):
+     * isso continua fora porque Criacao nao esta na lista.
+     */
     @PutMapping("/{id}")
     public UsuarioSaida atualizar(@PathVariable Long id,
-                                  @Validated(GruposValidacao.Edicao.class) @RequestBody UsuarioEntrada dados) {
+                                  @Validated({Default.class, GruposValidacao.Edicao.class}) @RequestBody UsuarioEntrada dados) {
         Usuario usuario = usuarios.findById(id)
                 .orElseThrow(() -> new RegraNegocioException(HttpStatus.NOT_FOUND, "Funcionario nao encontrado."));
 

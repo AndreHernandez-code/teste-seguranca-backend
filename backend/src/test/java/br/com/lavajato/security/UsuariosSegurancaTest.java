@@ -147,6 +147,51 @@ class UsuariosSegurancaTest {
     }
 
     @Test
+    @DisplayName("editar com perfil nulo responde 400 - nao deixa o PUT pular a validacao")
+    void editarComPerfilNuloEhRejeitado() throws Exception {
+        // REGRESSAO de auditoria: o PUT validava SOMENTE o grupo Edicao.class.
+        // As constraints de login/nome/perfil nao declaram grupos, entao
+        // pertencem ao grupo Default - e o Bean Validation NAO inclui o Default
+        // quando se pede apenas Edicao (a interface e vazia e nao estende
+        // Default). Resultado: "perfil": null passava pela validacao e ia para
+        // o banco, virando violacao de NOT NULL (409/500) em vez do 400 correto.
+        //
+        // A correcao inclui Default.class na lista de grupos validados do PUT
+        // (ver o javadoc de UsuarioController.atualizar). Este teste trava isso.
+        Long id = criarAtendente("perfil.nulo", "SenhaOriginalLonga123");
+
+        mockMvc.perform(put("/api/usuarios/" + id)
+                        .session(sessaoAdmin)
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("{\"login\":\"perfil.nulo\",\"senha\":\"\","
+                                + "\"nome\":\"Nome Valido\",\"perfil\":null}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.campos.perfil").exists());
+
+        // E o perfil gravado continua o anterior: a requisicao nao alterou nada.
+        assertThat(usuarios.findById(id).orElseThrow().getPerfil())
+                .isEqualTo(Perfil.ATENDENTE);
+    }
+
+    @Test
+    @DisplayName("editar com nome em branco responde 400 - constraint Default tambem no PUT")
+    void editarComNomeEmBrancoEhRejeitado() throws Exception {
+        // Mesmo defeito, pelo lado do nome: sem Default.class no PUT, um
+        // "nome": "" tambem escapava da validacao.
+        Long id = criarAtendente("nome.invalido", "SenhaOriginalLonga123");
+
+        mockMvc.perform(put("/api/usuarios/" + id)
+                        .session(sessaoAdmin)
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content("{\"login\":\"nome.invalido\",\"senha\":\"\","
+                                + "\"nome\":\"\",\"perfil\":\"ATENDENTE\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.campos.nome").exists());
+    }
+
+    @Test
     @DisplayName("nao e possivel desativar o ultimo ADMIN ativo")
     void naoDesativaUltimoAdmin() throws Exception {
         Long idUnico = garantirAdminUnicoAtivo();
