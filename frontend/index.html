@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Painel de agendamentos do lava-jato: clientes, veículos, serviços e agenda.">
+  <meta name="color-scheme" content="light dark">
+  <title>Lava-Jato &mdash; Painel de Agendamentos</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f6feb'/%3E%3Ctext x='16' y='22' font-family='system-ui,sans-serif' font-size='15' font-weight='700' fill='white' text-anchor='middle'%3ELJ%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar__brand">
+      <span class="topbar__mark" aria-hidden="true">LJ</span>
+      <div>
+        <h1 class="topbar__title">Lava-Jato</h1>
+        <p class="topbar__subtitle">Painel de agendamentos</p>
+      </div>
+    </div>
+
+    <div class="topbar__status">
+      <span id="status-dot" class="dot dot--idle" aria-hidden="true"></span>
+      <span id="status-text" role="status" aria-live="polite">Conectando&hellip;</span>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <nav class="tabs" role="tablist" aria-label="Seções">
+      <button class="tab" role="tab" id="tab-agendamentos" aria-controls="panel-agendamentos" aria-selected="true" data-panel="agendamentos">Agendamentos</button>
+      <button class="tab" role="tab" id="tab-clientes" aria-controls="panel-clientes" aria-selected="false" tabindex="-1" data-panel="clientes">Clientes</button>
+      <button class="tab" role="tab" id="tab-veiculos" aria-controls="panel-veiculos" aria-selected="false" tabindex="-1" data-panel="veiculos">Veículos</button>
+      <button class="tab" role="tab" id="tab-servicos" aria-controls="panel-servicos" aria-selected="false" tabindex="-1" data-panel="servicos">Serviços</button>
+    </nav>
+
+    <!-- ================= AGENDAMENTOS ================= -->
+    <section class="panel" id="panel-agendamentos" role="tabpanel" aria-labelledby="tab-agendamentos">
+
+      <div class="stats" id="stats-agendamentos">
+        <div class="stat">
+          <span class="stat__value" id="stat-agendamentos-total">&mdash;</span>
+          <span class="stat__label">Total</span>
+        </div>
+        <div class="stat">
+          <span class="stat__value" id="stat-agendamentos-aguardando">&mdash;</span>
+          <span class="stat__label">Aguardando</span>
+        </div>
+        <div class="stat">
+          <span class="stat__value" id="stat-agendamentos-faturamento">&mdash;</span>
+          <span class="stat__label">Faturamento previsto</span>
+        </div>
+      </div>
+
+      <div class="grid">
+        <article class="card">
+          <h2 class="card__title">Novo agendamento</h2>
+
+          <form id="form-agendamento" class="form" novalidate>
+            <div class="field">
+              <label for="ag-veiculo">Veículo <span class="req" aria-hidden="true">*</span></label>
+              <select id="ag-veiculo" name="veiculo" required>
+                <option value="">Selecione um veículo&hellip;</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="ag-servico">Serviço <span class="req" aria-hidden="true">*</span></label>
+              <select id="ag-servico" name="servico" required>
+                <option value="">Selecione um serviço&hellip;</option>
+              </select>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label for="ag-data">Data <span class="req" aria-hidden="true">*</span></label>
+                <input type="date" id="ag-data" name="data" required>
+              </div>
+              <div class="field">
+                <label for="ag-hora">Hora <span class="req" aria-hidden="true">*</span></label>
+                <input type="time" id="ag-hora" name="hora" required>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="ag-status">Status</label>
+              <select id="ag-status" name="status">
+                <option value="AGUARDANDO">Aguardando</option>
+                <option value="EM_ANDAMENTO">Em andamento</option>
+                <option value="CONCLUIDO">Concluído</option>
+                <option value="CANCELADO">Cancelado</option>
+              </select>
+            </div>
+
+            <button type="submit" class="btn btn--primary" id="btn-agendamento">Agendar</button>
+          </form>
+
+          <p class="hint" id="hint-agendamento" hidden></p>
+        </article>
+
+        <article class="card card--wide">
+          <div class="card__head">
+            <h2 class="card__title">Agenda</h2>
+            <div class="field field--inline">
+              <label for="filtro-status" class="sr-only">Filtrar por status</label>
+              <select id="filtro-status">
+                <option value="">Todos os status</option>
+                <option value="AGUARDANDO">Aguardando</option>
+                <option value="EM_ANDAMENTO">Em andamento</option>
+                <option value="CONCLUIDO">Concluído</option>
+                <option value="CANCELADO">Cancelado</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Data / Hora</th>
+                  <th scope="col">Cliente</th>
+                  <th scope="col">Veículo</th>
+                  <th scope="col">Serviço</th>
+                  <th scope="col" class="num">Valor</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" class="acoes-col">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-agendamentos"></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ================= CLIENTES ================= -->
+    <section class="panel" id="panel-clientes" role="tabpanel" aria-labelledby="tab-clientes" hidden>
+      <div class="grid">
+        <article class="card">
+          <h2 class="card__title">Novo cliente</h2>
+
+          <form id="form-cliente" class="form" novalidate>
+            <div class="field">
+              <label for="cl-nome">Nome <span class="req" aria-hidden="true">*</span></label>
+              <input type="text" id="cl-nome" name="nome" placeholder="Ex.: João Silva" autocomplete="name" required>
+            </div>
+
+            <div class="field">
+              <label for="cl-telefone">Telefone <span class="req" aria-hidden="true">*</span></label>
+              <input type="tel" id="cl-telefone" name="telefone" placeholder="(11) 99999-8888" autocomplete="tel" required>
+            </div>
+
+            <button type="submit" class="btn btn--primary" id="btn-cliente">Cadastrar</button>
+          </form>
+
+          <p class="hint" id="hint-cliente" hidden></p>
+        </article>
+
+        <article class="card card--wide">
+          <h2 class="card__title">Clientes cadastrados</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Nome</th>
+                  <th scope="col">Telefone</th>
+                  <th scope="col" class="num">Veículos</th>
+                  <th scope="col" class="acoes-col">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-clientes"></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ================= VEÍCULOS ================= -->
+    <section class="panel" id="panel-veiculos" role="tabpanel" aria-labelledby="tab-veiculos" hidden>
+      <div class="grid">
+        <article class="card">
+          <h2 class="card__title">Novo veículo</h2>
+
+          <form id="form-veiculo" class="form" novalidate>
+            <div class="field">
+              <label for="ve-cliente">Cliente <span class="req" aria-hidden="true">*</span></label>
+              <select id="ve-cliente" name="cliente" required>
+                <option value="">Selecione um cliente&hellip;</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="ve-placa">Placa <span class="req" aria-hidden="true">*</span></label>
+              <input type="text" id="ve-placa" name="placa" placeholder="ABC1D23" maxlength="8" autocapitalize="characters" spellcheck="false" required>
+            </div>
+
+            <div class="field">
+              <label for="ve-modelo">Modelo <span class="req" aria-hidden="true">*</span></label>
+              <input type="text" id="ve-modelo" name="modelo" placeholder="Ex.: Fiat Uno" required>
+            </div>
+
+            <button type="submit" class="btn btn--primary" id="btn-veiculo">Cadastrar</button>
+          </form>
+
+          <p class="hint" id="hint-veiculo" hidden></p>
+        </article>
+
+        <article class="card card--wide">
+          <h2 class="card__title">Frota cadastrada</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Placa</th>
+                  <th scope="col">Modelo</th>
+                  <th scope="col">Cliente</th>
+                  <th scope="col" class="acoes-col">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-veiculos"></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ================= SERVIÇOS ================= -->
+    <section class="panel" id="panel-servicos" role="tabpanel" aria-labelledby="tab-servicos" hidden>
+      <div class="grid">
+        <article class="card">
+          <h2 class="card__title">Novo serviço</h2>
+
+          <form id="form-servico" class="form" novalidate>
+            <div class="field">
+              <label for="se-nome">Nome <span class="req" aria-hidden="true">*</span></label>
+              <input type="text" id="se-nome" name="nome" placeholder="Ex.: Lavagem Simples" required>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label for="se-preco">Preço (R$) <span class="req" aria-hidden="true">*</span></label>
+                <input type="number" id="se-preco" name="preco" step="0.01" min="0" placeholder="49.90" required>
+              </div>
+              <div class="field">
+                <label for="se-tempo">Duração (min) <span class="req" aria-hidden="true">*</span></label>
+                <input type="number" id="se-tempo" name="tempoEstimado" step="5" min="1" placeholder="30" required>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn--primary" id="btn-servico">Cadastrar</button>
+          </form>
+
+          <p class="hint" id="hint-servico" hidden></p>
+        </article>
+
+        <article class="card card--wide">
+          <h2 class="card__title">Catálogo de serviços</h2>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">#</th>
+                  <th scope="col">Nome</th>
+                  <th scope="col" class="num">Preço</th>
+                  <th scope="col" class="num">Duração</th>
+                  <th scope="col" class="acoes-col">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-servicos"></tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- ================= DIALOG: EDITAR ================= -->
+  <dialog class="dialog" id="dialog-editar" aria-labelledby="dialog-editar-titulo">
+    <form class="form" id="form-editar" novalidate>
+      <header class="dialog__head">
+        <h2 class="dialog__title" id="dialog-editar-titulo">Editar</h2>
+      </header>
+
+      <div class="dialog__body" id="dialog-editar-campos"></div>
+
+      <p class="hint" id="hint-editar" hidden></p>
+
+      <footer class="dialog__foot">
+        <button type="button" class="btn btn--ghost" data-fechar>Cancelar</button>
+        <button type="submit" class="btn btn--primary" id="btn-salvar-edicao">Salvar</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ================= DIALOG: CONFIRMAR EXCLUSAO ================= -->
+  <dialog class="dialog dialog--sm" id="dialog-excluir" aria-labelledby="dialog-excluir-titulo">
+    <header class="dialog__head">
+      <h2 class="dialog__title" id="dialog-excluir-titulo">Confirmar exclusão</h2>
+    </header>
+
+    <div class="dialog__body">
+      <p id="dialog-excluir-texto"></p>
+    </div>
+
+    <footer class="dialog__foot">
+      <button type="button" class="btn btn--ghost" data-fechar>Cancelar</button>
+      <button type="button" class="btn btn--danger" id="btn-confirmar-exclusao">Excluir</button>
+    </footer>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
